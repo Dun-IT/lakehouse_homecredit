@@ -626,7 +626,7 @@ if __name__ == "__main__":
     # build_fact_previous_application(spark, BRONZE_BASE, SILVER_BASE)
     # build_fact_pos_cash_balance(spark, BRONZE_BASE, SILVER_BASE)
     # build_fact_credit_card_balance(spark, BRONZE_BASE, SILVER_BASE)
-    # build_fact_installments_payments(spark, BRONZE_BASE, SILVER_BASE)
+    build_fact_installments_payments(spark, BRONZE_BASE, SILVER_BASE)
     spark.stop()
 
 

@@ -14,10 +14,10 @@ default_args = {
 with DAG(
     dag_id='data_processing',
     default_args=default_args,
-    description='Submit Bronze layer ingest script via BashOperator',
+    description='Submit ingest script via BashOperator',
     schedule_interval='@daily',
     catchup=False,
-    tags=['bronze', 'ingest'],
+    tags=['etl', 'ingest', 'lakehouse'],
 ) as dag:
     # 1) Bronze layer
     run_bronze_ingest = BashOperator(
@@ -32,4 +32,12 @@ with DAG(
             'bash /mnt/spark-apps/silver/run_silver_ingest.sh >> /opt/airflow/logs/silver_ingest.log 2>&1',
     )
 
-    run_bronze_ingest >> run_silver_ingest
+    # 3) Gold layer
+    run_gold_ingest = BashOperator(
+        task_id='run_gold_ingest',
+        bash_command=
+        'bash /mnt/spark-apps/gold/run_gold_ingest.sh >> /opt/airflow/logs/gold_ingest.log 2>&1',
+    )
+
+
+    run_bronze_ingest >> run_silver_ingest >> run_gold_ingest
