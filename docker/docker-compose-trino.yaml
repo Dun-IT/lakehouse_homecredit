@@ -1,0 +1,24 @@
+version: "3.7"
+
+services:
+  trino:
+    image: trinodb/trino:426
+    container_name: trino
+    platform: linux/amd64
+    volumes:
+#      - ../conf/trino/config.properties:/etc/trino/config.properties:ro
+#      - ../conf/trino/jvm.config:/etc/trino/jvm.config:ro
+      - ../conf/trino/catalog/delta.properties:/etc/trino/catalog/delta.properties:ro
+      - ../conf/hadoop:/etc/hadoop/conf:ro   # core-site.xml for S3
+    ports:
+      - "9090:8080"
+    environment:
+      - AWS_ACCESS_KEY_ID=minio
+      - AWS_SECRET_ACCESS_KEY=minio_admin
+      - AWS_DEFAULT_REGION=us-west-1
+    networks:
+      - lakehouse-net
+
+networks:
+  lakehouse-net:
+    external: true

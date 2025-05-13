@@ -1,0 +1,50 @@
+# docker-compose-spark.yml
+version: "3.7"
+
+services:
+  # Spark Master
+  spark-master:
+    image: bitnami/spark:3.5.2
+    container_name: spark-apps-master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark-apps-master
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+    volumes:
+      - ../spark-apps:/opt/spark-apps
+    networks:
+      - lakehouse-net
+
+  # Spark Worker 1
+  spark-worker-1:
+    image: bitnami/spark:3.5.2
+    container_name: spark-apps-worker-1
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-apps-master:7077
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=2g
+    depends_on:
+      - spark-master
+    networks:
+      - lakehouse-net
+
+  # Spark Worker 2
+  spark-worker-2:
+    image: bitnami/spark:3.5.2
+    container_name: spark-apps-worker-2
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-apps-master:7077
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=2g
+    depends_on:
+      - spark-master
+    networks:
+      - lakehouse-net
+
+networks:
+  lakehouse-net:
+    external: true

@@ -1,0 +1,29 @@
+version: "3.7"
+
+services:
+  metastore:
+    image: apache/hive:3.1.3
+    container_name: metastore
+    platform: linux/amd64
+    volumes:
+      - ../jars/hadoop-aws-3.2.0.jar:/opt/hive/lib/hadoop-aws-3.2.0.jar
+      - ../jars/mysql-connector-java-8.0.23.jar:/opt/hive/lib/mysql-connector-java-8.0.23.jar
+      - ../jars/aws-java-sdk-bundle-1.11.375.jar:/opt/hive/lib/aws-java-sdk-bundle-1.11.375.jar
+      - ../conf/hive:/opt/hive/conf       # hive-site.xml, core-site.xml
+    environment:
+      - SERVICE_NAME=metastore
+      - DB_TYPE=mysql
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_NAME=metastore
+      - DB_USER=dataeng
+      - DB_PASSWORD=dataengineering_user
+      - IS_RESUME=true                  # skip bootstrap on subsequent runs
+    ports:
+      - "9083:9083"
+    networks:
+      - lakehouse-net
+
+networks:
+  lakehouse-net:
+    external: true

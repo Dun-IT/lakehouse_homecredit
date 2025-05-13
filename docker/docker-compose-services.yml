@@ -1,0 +1,89 @@
+# docker-compose-services.yml
+version: "3.7"
+
+services:
+  # PostgreSQL - Metadata backend cho Superset và Airflow
+  postgres:
+    image: postgres:14
+    container_name: postgres
+    environment:
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: superset
+      POSTGRES_DB: superset
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U superset" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lakehouse-net
+
+  # Apache Superset - Dashboard
+  superset:
+    image: apache/superset:latest
+    container_name: superset
+    environment:
+      - SUPERSET_SECRET_KEY=supersecretkey
+      - SQLALCHEMY_DATABASE_URI=postgresql+psycopg2://superset:superset@postgres:5432/superset
+      - SUPERSET_WEBSERVER_TIMEOUT=43200
+      - SESSION_COOKIE_TIMEOUT=43200
+      - SESSION_COOKIE_SAMESITE=Lax
+    ports:
+      - "8089:8088"
+    entrypoint: >
+      /bin/bash -c "
+      superset db upgrade &&
+      superset init &&
+      superset fab create-admin --username admin --firstname admin --lastname admin --email admin@example.com --password admin123 || true &&
+      superset load_examples &&
+      superset run -h 0.0.0.0 -p 8088 --with-threads --reload --debugger
+      "
+    depends_on:
+      - postgres
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    networks:
+      - lakehouse-net
+
+  # Apache Airflow - Orchestration
+  airflow:
+    image: apache/airflow:2.8.1
+    container_name: airflow
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://superset:superset@postgres:5432/superset
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://superset:superset@postgres:5432/superset
+      - AIRFLOW__WEBSERVER__SECRET_KEY=airflow_secret
+      - _PIP_ADDITIONAL_REQUIREMENTS=apache-airflow-providers-amazon
+      - AIRFLOW__WEBSERVER__SESSION_LIFETIME_SECONDS=43200
+      - AIRFLOW__WEBSERVER__SESSION_COOKIE_SAMESITE=Lax
+      - _AIRFLOW_WWW_USER_CREATE=True
+      - _AIRFLOW_WWW_USER_USERNAME=admin
+      - _AIRFLOW_WWW_USER_PASSWORD=admin123
+      - _AIRFLOW_WWW_USER_FIRSTNAME=Admin
+      - _AIRFLOW_WWW_USER_LASTNAME=User
+      - _AIRFLOW_WWW_USER_EMAIL=admin@example.com
+      - _PIP_ADDITIONAL_REQUIREMENTS=apache-airflow-providers-amazon apache-airflow-providers-docker apache-airflow-providers-apache-spark
+    ports:
+      - "8082:8080"
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags
+      - ../spark-apps:/mnt/spark-apps
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: standalone
+    depends_on:
+      - postgres
+    networks:
+      - lakehouse-net
+
+volumes:
+  postgres-data:
+
+networks:
+  lakehouse-net:
+    external: true

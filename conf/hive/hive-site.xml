@@ -1,0 +1,51 @@
+<configuration>
+  <!-- Kết nối Metastore MySQL -->
+  <property>
+    <name>javax.jdo.option.ConnectionURL</name>
+    <value>jdbc:mysql://mysql:3306/metastore</value>
+  </property>
+  <property>
+    <name>javax.jdo.option.ConnectionDriverName</name>
+    <value>com.mysql.cj.jdbc.Driver</value>
+  </property>
+  <property>
+    <name>javax.jdo.option.ConnectionUserName</name>
+    <value>dataeng</value>               <!-- MYSQL_USER trong compose -->
+  </property>
+  <property>
+    <name>javax.jdo.option.ConnectionPassword</name>
+    <value>dataengineering_user</value>           <!-- MYSQL_PASSWORD -->
+  </property>
+
+  <!-- Thư mục warehouse trên MinIO -->
+  <property>
+    <name>hive.metastore.warehouse.dir</name>
+    <value>s3a://lakehouse/</value>    <!-- bucket: lakehouse -->
+  </property>
+
+  <!-- Cấu hình S3A cho MinIO -->
+  <property>
+    <name>fs.s3a.endpoint</name>
+    <value>http://minio:9000</value>
+  </property>
+  <property>
+    <name>fs.s3a.access.key</name>
+    <value>minio</value>
+  </property>
+  <property>
+    <name>fs.s3a.secret.key</name>
+    <value>minio_admin</value>
+  </property>
+  <property>
+    <name>fs.s3a.path.style.access</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>fs.s3a.connection.ssl.enabled</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>fs.s3a.impl</name>
+    <value>org.apache.hadoop.fs.s3a.S3AFileSystem</value>
+  </property>
+</configuration>
