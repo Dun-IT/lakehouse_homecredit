@@ -37,6 +37,9 @@ export PYSPARK_DRIVER_PYTHON=python3
   --conf spark.hadoop.fs.s3a.path.style.access=true \
   --conf spark.hadoop.fs.s3a.connection.ssl.enabled=false \
   --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
+  --conf spark.rpc.message.maxSize=1024 \
+  --conf spark.network.timeout=800s \
+  --conf spark.executor.heartbeatInterval=60s \
   ${SCRIPT_PATH}
 EOF
 

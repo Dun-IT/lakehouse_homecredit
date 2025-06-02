@@ -22,3 +22,5 @@ services:
 networks:
   lakehouse-net:
     external: true
+
+

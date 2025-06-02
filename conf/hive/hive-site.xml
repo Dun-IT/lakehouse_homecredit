@@ -10,7 +10,7 @@
   </property>
   <property>
     <name>javax.jdo.option.ConnectionUserName</name>
-    <value>dataeng</value>               <!-- MYSQL_USER trong compose -->
+    <value>dataeng</value>               <!-- MYSQL_USER -->
   </property>
   <property>
     <name>javax.jdo.option.ConnectionPassword</name>

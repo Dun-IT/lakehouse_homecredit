@@ -1,3 +1,5 @@
+import re
+
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col,
@@ -13,9 +15,27 @@ from pyspark.sql.functions import (
     when,
     date_format,
     add_months,
-    round as spark_round
+    avg,
+    countDistinct,
+    percentile_approx,
+    avg as spark_avg,
+    max as spark_max,
+    min as spark_min,
+    round as spark_round,
+    variance as spark_var,
+    sum as spark_sum,
+    count as spark_count, udf
 )
+from pyspark.ml.feature import VectorAssembler, StandardScaler, UnivariateFeatureSelector
+from pyspark.sql.window import Window
+from pyspark.sql.functions import first, last, row_number
+from pyspark.sql.types import StringType
 
+from pyspark.ml import Pipeline
+from pyspark.ml.classification import LinearSVC
+from pyspark.ml.evaluation import BinaryClassificationEvaluator
+from pyspark.ml.feature import VectorAssembler, StandardScaler, UnivariateFeatureSelector
+from pyspark.ml.tuning import ParamGridBuilder, CrossValidator
 
 def create_spark_session():
     return (
@@ -606,11 +626,242 @@ def build_fact_installments_payments(spark, bronze_base, silver_base):
         .option("overwriteSchema", True) \
         .save(f"{silver_base}/fact_installments_payments")
 
+
+# def clean_application(spark, bronze_base: str, silver_base: str):
+#     bronze_path = f"{bronze_base}/application_train"
+#     silver_path = f"{silver_base}/application_clean"
+#
+#     # 1. Load Bronze
+#     df = spark.read.format("delta").load(bronze_path)
+#
+#     # 2. Tính giá trị max của DAYS_EMPLOYED (sentinel) để thay bằng null
+#     max_days_emp = df.agg(spark_max("DAYS_EMPLOYED").alias("max_de")).collect()[0]["max_de"]
+#
+#     df_clean = (
+#         df
+#         # 3. Thay sentinel DAYS_EMPLOYED → null
+#         .withColumn(
+#             "DAYS_EMPLOYED",
+#             when(col("DAYS_EMPLOYED") == lit(max_days_emp), None)
+#             .otherwise(col("DAYS_EMPLOYED"))
+#         )
+#         # 4. Fill NA cho các categorical
+#         .na.fill({
+#             "NAME_FAMILY_STATUS":  "Data_Not_Available",
+#             "NAME_HOUSING_TYPE":   "Data_Not_Available",
+#             "FLAG_MOBIL":          "Data_Not_Available",
+#             "FLAG_EMP_PHONE":      "Data_Not_Available",
+#             "FLAG_CONT_MOBILE":    "Data_Not_Available",
+#             "FLAG_EMAIL":          "Data_Not_Available",
+#             "OCCUPATION_TYPE":     "Data_Not_Available",
+#             "NAME_TYPE_SUITE":     "Unaccompanied",
+#         })
+#         # 5. Replace Unknown → Married
+#         .withColumn(
+#             "NAME_FAMILY_STATUS",
+#             when(col("NAME_FAMILY_STATUS") == "Unknown", "Married")
+#             .otherwise(col("NAME_FAMILY_STATUS"))
+#         )
+#         # 6. Replace XNA → M
+#         .withColumn(
+#             "CODE_GENDER",
+#             when(col("CODE_GENDER") == "XNA", "M")
+#             .otherwise(col("CODE_GENDER"))
+#         )
+#         # 7. Fill numeric nulls
+#         .na.fill({
+#             "AMT_ANNUITY":      0.0,
+#             "AMT_GOODS_PRICE":  0.0,
+#             "EXT_SOURCE_1":     0.0,
+#             "EXT_SOURCE_2":     0.0,
+#             "EXT_SOURCE_3":     0.0
+#         })
+#     )
+#
+#     # 8. Tìm mode của CNT_FAM_MEMBERS và fill
+#     #    (lấy giá trị CNT_FAM_MEMBERS xuất hiện nhiều nhất)
+#     mode_cnt = (
+#         df_clean.groupBy("CNT_FAM_MEMBERS")
+#                 .count()
+#                 .orderBy(col("count").desc())
+#                 .first()[0]
+#     )
+#     df_clean = df_clean.withColumn(
+#         "CNT_FAM_MEMBERS",
+#         when(col("CNT_FAM_MEMBERS").isNull(), lit(mode_cnt))
+#         .otherwise(col("CNT_FAM_MEMBERS"))
+#     )
+#
+#     # 9. Ghi ra Silver
+#     (
+#         df_clean.write
+#           .format("delta")
+#           .mode("overwrite")
+#           .option("overwriteSchema", True)
+#           .save(silver_path)
+#     )
+
+def clean_application(spark, bronze_base: str, silver_base: str, table_name: str):
+    """
+    Đọc từ bronze/<table_name>, làm sạch và ghi ra silver/<table_name>_clean.
+    """
+    bronze_path = f"{bronze_base}/{table_name}"
+    silver_path = f"{silver_base}/{table_name}_clean"
+
+    df = spark.read.format("delta").load(bronze_path)
+
+    # Thay sentinel DAYS_EMPLOYED > 0 thành null
+    df = df.withColumn(
+        "DAYS_EMPLOYED",
+        when(col("DAYS_EMPLOYED") > 0, None)
+        .otherwise(col("DAYS_EMPLOYED"))
+    )
+
+    # Fill NA categorical
+    df = df.na.fill({
+        "NAME_FAMILY_STATUS":  "Data_Not_Available",
+        "NAME_HOUSING_TYPE":   "Data_Not_Available",
+        "FLAG_MOBIL":          "Data_Not_Available",
+        "FLAG_EMP_PHONE":      "Data_Not_Available",
+        "FLAG_CONT_MOBILE":    "Data_Not_Available",
+        "FLAG_EMAIL":          "Data_Not_Available",
+        "OCCUPATION_TYPE":     "Data_Not_Available",
+        "NAME_TYPE_SUITE":     "Unaccompanied",
+    })
+
+    # Replace cụ thể
+    df = df.withColumn(
+        "NAME_FAMILY_STATUS",
+        when(col("NAME_FAMILY_STATUS") == "Unknown", "Married")
+        .otherwise(col("NAME_FAMILY_STATUS"))
+    ).withColumn(
+        "CODE_GENDER",
+        when(col("CODE_GENDER") == "XNA", "M").otherwise(col("CODE_GENDER"))
+    )
+
+    # Fill numeric nulls
+    df = df.na.fill({
+        "AMT_ANNUITY":     0.0,
+        "AMT_GOODS_PRICE": 0.0,
+        "EXT_SOURCE_1":    0.0,
+        "EXT_SOURCE_2":    0.0,
+        "EXT_SOURCE_3":    0.0
+    })
+
+    # Fill mode CNT_FAM_MEMBERS
+    mode_cnt = df.groupBy("CNT_FAM_MEMBERS").count()\
+                 .orderBy(col("count").desc()).first()[0]
+    df = df.withColumn(
+        "CNT_FAM_MEMBERS",
+        when(col("CNT_FAM_MEMBERS").isNull(), lit(mode_cnt))
+        .otherwise(col("CNT_FAM_MEMBERS"))
+    )
+
+    # Ghi ra silver
+    (
+        df.write
+          .format("delta")
+          .mode("overwrite")
+          .option("overwriteSchema", True)
+          .save(silver_path)
+    )
+
+
+def fe_application_silver(spark, silver_base: str, table_name: str):
+    """
+    Đọc từ silver/{table_name}_clean, tạo feature, ghi ra silver/{table_name}_features.
+    """
+    silver_input  = f"{silver_base}/{table_name}_clean"
+    silver_output = f"{silver_base}/{table_name}_features"
+
+    # 1. Load clean table
+    df = spark.read.format("delta").load(silver_input)
+
+    # 2. Drop metadata
+    df = df.drop("ingest_date", "ingest_timestamp")
+
+    # 3. Tính các feature mới
+    df = (
+        df
+        .withColumn("CREDIT_INCOME_PERCENT",      col("AMT_CREDIT")   / col("AMT_INCOME_TOTAL"))
+        .withColumn("ANNUITY_INCOME_PERCENT",     col("AMT_ANNUITY")  / col("AMT_INCOME_TOTAL"))
+        .withColumn("CREDIT_ANNUITY_PERCENT",     col("AMT_CREDIT")   / col("AMT_ANNUITY"))
+        .withColumn("FAMILY_CNT_INCOME_PERCENT",  col("AMT_INCOME_TOTAL") / col("CNT_FAM_MEMBERS"))
+        .withColumn("CREDIT_TERM",                col("AMT_ANNUITY")  / col("AMT_CREDIT"))
+        .withColumn("BIRTH_EMPLOYED_PERCENT",     col("DAYS_EMPLOYED")/ col("DAYS_BIRTH"))
+        .withColumn("CHILDREN_CNT_INCOME_PERCENT",col("AMT_INCOME_TOTAL") / col("CNT_CHILDREN"))
+        .withColumn("CREDIT_GOODS_DIFF",          col("AMT_CREDIT")   - col("AMT_GOODS_PRICE"))
+        .withColumn("EMPLOYED_REGISTRATION_PERCENT", col("DAYS_EMPLOYED")/ col("DAYS_REGISTRATION"))
+        .withColumn("BIRTH_REGISTRATION_PERCENT", col("DAYS_BIRTH")   / col("DAYS_REGISTRATION"))
+        .withColumn("ID_REGISTRATION_DIFF",       col("DAYS_ID_PUBLISH") - col("DAYS_REGISTRATION"))
+        .withColumn("ANNUITY_LENGTH_EMPLOYED_PERCENT", col("CREDIT_TERM")/ col("DAYS_EMPLOYED"))
+        .withColumn("AGE_LOAN_FINISH",
+            -col("DAYS_BIRTH")/lit(365.0) +
+            (col("AMT_CREDIT")/col("AMT_ANNUITY"))/lit(12.0)
+        )
+        .withColumn("CAR_AGE_EMP_PERCENT",        col("OWN_CAR_AGE") / col("DAYS_EMPLOYED"))
+        .withColumn("CAR_AGE_BIRTH_PERCENT",      col("OWN_CAR_AGE") / col("DAYS_BIRTH"))
+        .withColumn("PHONE_CHANGE_EMP_PERCENT",   col("DAYS_LAST_PHONE_CHANGE")/ col("DAYS_EMPLOYED"))
+        .withColumn("PHONE_CHANGE_BIRTH_PERCENT", col("DAYS_LAST_PHONE_CHANGE")/ col("DAYS_BIRTH"))
+    )
+
+    # 4. Tính median theo nhóm categorical và join lại
+    grouping = {
+        "NAME_CONTRACT_TYPE":  "MEDIAN_INCOME_CONTRACT_TYPE",
+        "NAME_TYPE_SUITE":     "MEDIAN_INCOME_SUITE_TYPE",
+        "NAME_HOUSING_TYPE":   "MEDIAN_INCOME_HOUSING_TYPE",
+        "ORGANIZATION_TYPE":   "MEDIAN_INCOME_ORG_TYPE",
+        "OCCUPATION_TYPE":     "MEDIAN_INCOME_OCCU_TYPE",
+        "NAME_EDUCATION_TYPE": "MEDIAN_INCOME_EDU_TYPE"
+    }
+    for cat_col, new_col in grouping.items():
+        med = (
+            df.groupBy(cat_col)
+              .agg(percentile_approx("AMT_INCOME_TOTAL", lit(0.5)).alias(new_col))
+        )
+        df = df.join(med, on=cat_col, how="left")
+
+    # 5. Tỷ lệ so với median
+    df = (
+        df
+        .withColumn("ORG_TYPE_INCOME_PERCENT", col("MEDIAN_INCOME_ORG_TYPE")/col("AMT_INCOME_TOTAL"))
+        .withColumn("OCCU_TYPE_INCOME_PERCENT",col("MEDIAN_INCOME_OCCU_TYPE")/col("AMT_INCOME_TOTAL"))
+        .withColumn("EDU_TYPE_INCOME_PERCENT", col("MEDIAN_INCOME_EDU_TYPE")/col("AMT_INCOME_TOTAL"))
+    )
+
+    # 6. Drop các cột FLAG_DOCUMENT_2..FLAG_DOCUMENT_21
+    drop_flags = [f"FLAG_DOCUMENT_{i}" for i in range(2, 22)]
+    df = df.drop(*drop_flags)
+
+    # 7. One‐hot encode mọi cột string (sanitize tên cột)
+    for fld in [f.name for f in df.schema.fields if isinstance(f.dataType, StringType)]:
+        vals = [r[0] for r in df.select(fld).distinct().collect()]
+        for v in vals:
+            safe = re.sub(r'[^0-9A-Za-z_]', '_', str(v))
+            df = df.withColumn(f"{fld}_{safe}", when(col(fld)==v, 1).otherwise(0))
+        df = df.drop(fld)
+
+    # 8. Ghi kết quả ra Silver
+    (
+        # df.write
+        #   .format("delta")
+        #   .mode("overwrite")
+        #   .option("overwriteSchema", True)
+        #   .save(silver_output)
+        df.coalesce(1)
+        .write
+        .mode("overwrite")
+        .option("header", True)  # ghi header lên file CSV
+        .option("delimiter", ",")  # dấu phân cách (mặc định là ",")
+        .csv(silver_output + "_csv")  # thư mục đầu ra sẽ là silver/{table_name}_features_csv
+    )
+
+
 if __name__ == "__main__":
     spark = create_spark_session()
-
     BRONZE_BASE = "s3a://lakehouse/bronze"
     SILVER_BASE = "s3a://lakehouse/silver"
+    GOLD_BASE = "s3a://lakehouse/gold"
 
     # build_dim_date(spark, BRONZE_BASE, SILVER_BASE)
     # build_dim_client(spark, BRONZE_BASE, SILVER_BASE)
@@ -626,7 +877,23 @@ if __name__ == "__main__":
     # build_fact_previous_application(spark, BRONZE_BASE, SILVER_BASE)
     # build_fact_pos_cash_balance(spark, BRONZE_BASE, SILVER_BASE)
     # build_fact_credit_card_balance(spark, BRONZE_BASE, SILVER_BASE)
-    build_fact_installments_payments(spark, BRONZE_BASE, SILVER_BASE)
+    # build_fact_installments_payments(spark, BRONZE_BASE, SILVER_BASE)
+
+    # clean_application(spark, BRONZE_BASE, SILVER_BASE, "application_train")
+    # fe_application_silver(spark, SILVER_BASE, "application_train")
+
+    clean_application(spark, BRONZE_BASE, SILVER_BASE, "application_test")
+    # fe_application_silver(spark, SILVER_BASE, "application_test")
+
+    # Optionally write out to Silver
+    # train_df.write.format("delta").mode("overwrite") \
+    #     .option("overwriteSchema", True).save(f"{SILVER_BASE}/final_train")
+    # val_df.write.format("delta").mode("overwrite") \
+    #     .option("overwriteSchema", True).save(f"{SILVER_BASE}/final_validation")
+    # test_df.write.format("delta").mode("overwrite") \
+    #     .option("overwriteSchema", True).save(f"{SILVER_BASE}/final_test")
+
     spark.stop()
+
 
 
